@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minimax & Alpha-Beta 剪枝可视化</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .node { transition: all 0.3s ease; }
+        .node-circle { fill: #fff; stroke: #333; stroke-width: 2px; }
+        .node-text { font-size: 12px; font-weight: bold; text-anchor: middle; dominant-baseline: middle; }
+        .edge { stroke: #cbd5e1; stroke-width: 2px; fill: none; }
+        .edge-active { stroke: #3b82f6; stroke-width: 3px; }
+        .pruned { stroke: #ef4444; stroke-dasharray: 4; opacity: 0.5; }
+        .highlight-max { fill: #dcfce7; stroke: #22c55e; }
+        .highlight-min { fill: #fee2e2; stroke: #ef4444; }
+        .ab-text { font-size: 10px; fill: #64748b; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 md:p-8">
+    <div class="max-w-6xl mx-auto">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-slate-800">Minimax 算法可视化演示</h1>
+            <p class="text-slate-600 mt-2">通过交互式树图理解博弈论算法的工作原理</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <!-- 配置面板 -->
+            <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <h2 class="text-lg font-semibold mb-4 border-b pb-2">参数配置</h2>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700">当前玩家 (根节点)</label>
+                        <select id="playerType" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-slate-50 p-2 border">
+                            <option value="1">MAX (极大值)</option>
+                            <option value="-1">MIN (极小值)</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700">叶子节点值 (空格分隔)</label>
+                        <textarea id="leafValues" rows="3" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-slate-50 p-2 border font-mono text-sm" placeholder="例如: 3 5 2 9 12 5 23 23">3 5 2 9 12 5 23 23</textarea>
+                        <p class="text-xs text-slate-500 mt-1">需提供 2^n 个数值以构建满二叉树。</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700">算法选择</label>
+                        <select id="algoType" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-slate-50 p-2 border">
+                            <option value="minimax">标准 Minimax</option>
+                            <option value="negamax">Alpha-Beta Negamax</option>
+                        </select>
+                    </div>
+
+                    <button id="runBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-200">
+                        更新并运行
+                    </button>
+                </div>
+
+                <div class="mt-6 p-4 bg-blue-50 rounded-lg text-xs text-blue-800 leading-relaxed">
+                    <strong>图例说明:</strong><br>
+                    • 绿色节点: MAX 决策层<br>
+                    • 红色节点: MIN 决策层<br>
+                    • 虚线/红色边: 被剪枝的路径<br>
+                    • [α, β]: Negamax 中的搜索范围
+                </div>
+            </div>
+
+            <!-- 可视化显示区域 -->
+            <div class="lg:col-span-3 bg-white p-6 rounded-xl shadow-sm border border-slate-200 relative min-h-[500px]">
+                <div id="canvas-container" class="w-full overflow-auto">
+                    <svg id="tree-svg" class="w-full" height="500"></svg>
+                </div>
+                
+                <!-- 实时状态说明 -->
+                <div id="status-box" class="mt-4 p-3 bg-slate-800 text-white rounded text-sm font-mono hidden">
+                    等待运行...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const svg = document.getElementById('tree-svg');
+        const container = document.getElementById('canvas-container');
+        const statusBox = document.getElementById('status-box');
+
+        let nodes = [];
+        let edges = [];
+        let depth = 0;
+
+        function init() {
+            document.getElementById('runBtn').addEventListener('click', startSimulation);
+            startSimulation();
+        }
+
+        function startSimulation() {
+            const leafStr = document.getElementById('leafValues').value.trim();
+            const leafValues = leafStr.split(/\s+/).map(Number).filter(n => !isNaN(n));
+            const startPlayer = parseInt(document.getElementById('playerType').value);
+            const algo = document.getElementById('algoType').value;
+
+            // 检查叶子数量是否为2的幂
+            const n = leafValues.length;
+            if (n === 0 || (n & (n - 1)) !== 0) {
+                alert("请输入 2^n 个数字（如 2, 4, 8, 16...）以构建完美的二叉树结构。");
+                return;
+            }
+
+            depth = Math.log2(n);
+            nodes = [];
+            edges = [];
+            svg.innerHTML = '';
+
+            // 1. 构建树结构（预排版）
+            buildTreeLayout(leafValues, startPlayer);
+            
+            // 2. 执行算法
+            const results = [];
+            if (algo === 'minimax') {
+                runMinimax(0, 0, startPlayer, results);
+            } else {
+                runNegamax(0, 0, startPlayer, -Infinity, Infinity, results);
+            }
+
+            // 3. 渲染
+            renderTree();
+        }
+
+        function buildTreeLayout(leafValues, startPlayer) {
+            let idCounter = 0;
+            
+            function createNode(d, index, player) {
+                const node = {
+                    id: idCounter++,
+                    depth: d,
+                    index: index,
+                    player: player, // 1 for MAX, -1 for MIN
+                    value: null,
+                    isLeaf: d === depth,
+                    x: 0,
+                    y: (d * 80) + 40,
+                    children: [],
+                    isPruned: false,
+                    ab: null // Alpha-Beta values
+                };
+
+                if (d < depth) {
+                    node.children.push(createNode(d + 1, index * 2, -player));
+                    node.children.push(createNode(d + 1, index * 2 + 1, -player));
+                } else {
+                    node.value = leafValues[index];
+                }
+                
+                nodes.push(node);
+                return node;
+            }
+
+            const root = createNode(0, 0, startPlayer);
+            
+            // 计算 X 坐标 (水平分布)
+            const leafCount = Math.pow(2, depth);
+            const spacing = Math.max(container.clientWidth / (leafCount + 1), 40);
+            svg.setAttribute('width', Math.max(container.clientWidth, spacing * (leafCount + 1)));
+
+            nodes.forEach(node => {
+                const levelLeafCount = Math.pow(2, depth - node.depth);
+                const offset = (Math.pow(2, node.depth) - 1) * levelLeafCount;
+                // 计算该层节点的中心位置
+                node.x = (node.index * levelLeafCount + levelLeafCount / 2) * spacing;
+            });
+        }
+
+        function runMinimax(nodeId, d, player, results) {
+            const node = nodes.find(n => n.id === nodeId);
+            if (node.isLeaf) return node.value;
+
+            let vals = node.children.map(child => runMinimax(child.id, d + 1, -player, results));
+            
+            if (player === 1) { // MAX
+                node.value = Math.max(...vals);
+            } else { // MIN
+                node.value = Math.min(...vals);
+            }
+            return node.value;
+        }
+
+        function runNegamax(nodeId, d, color, alpha, beta, results) {
+            const node = nodes.find(n => n.id === nodeId);
+            node.ab = { alpha, beta };
+
+            if (node.isLeaf) {
+                node.value = color * node.value; // Negamax leaf value transformation
+                return node.value;
+            }
+
+            let value = -Infinity;
+            for (let i = 0; i < node.children.length; i++) {
+                const child = node.children[i];
+                const res = -runNegamax(child.id, d + 1, -color, -beta, -alpha, results);
+                value = Math.max(value, res);
+                alpha = Math.max(alpha, value);
+                
+                if (alpha >= beta) {
+                    // 剪枝剩下的兄弟节点
+                    for (let j = i + 1; j < node.children.length; j++) {
+                        markPruned(node.children[j]);
+                    }
+                    break; 
+                }
+            }
+            node.value = value;
+            return value;
+        }
+
+        function markPruned(node) {
+            node.isPruned = true;
+            node.children.forEach(markPruned);
+        }
+
+        function renderTree() {
+            const isNegamax = document.getElementById('algoType').value === 'negamax';
+
+            // 绘制连线
+            nodes.forEach(node => {
+                node.children.forEach(child => {
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    line.setAttribute("x1", node.x);
+                    line.setAttribute("y1", node.y);
+                    line.setAttribute("x2", child.x);
+                    line.setAttribute("y2", child.y);
+                    line.setAttribute("class", "edge" + (child.isPruned ? " pruned" : ""));
+                    svg.appendChild(line);
+                });
+            });
+
+            // 绘制节点
+            nodes.forEach(node => {
+                const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                g.setAttribute("class", "node");
+                
+                const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                circle.setAttribute("cx", node.x);
+                circle.setAttribute("cy", node.y);
+                circle.setAttribute("r", 18);
+                
+                let colorClass = "node-circle";
+                if (!node.isPruned) {
+                    colorClass += node.player === 1 ? " highlight-max" : " highlight-min";
+                }
+                circle.setAttribute("class", colorClass);
+                if(node.isPruned) circle.setAttribute("style", "opacity: 0.3");
+
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute("x", node.x);
+                text.setAttribute("y", node.y);
+                text.setAttribute("class", "node-text");
+                
+                // 处理 Negamax 的显示值（转换回绝对分值或显示相对分值）
+                let displayVal = node.value;
+                if (isNegamax && node.value !== null) {
+                    // 如果根节点是 MIN 且当前是 MIN 层，Negamax 内部计算是相对的
+                    // 这里简化显示：直接显示计算出的得分
+                }
+                text.textContent = displayVal !== null ? displayVal : "?";
+                if(node.isPruned) text.setAttribute("style", "opacity: 0.3");
+
+                g.appendChild(circle);
+                g.appendChild(text);
+
+                // 显示 Alpha Beta
+                if (isNegamax && node.ab && !node.isPruned) {
+                    const abText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                    abText.setAttribute("x", node.x);
+                    abText.setAttribute("y", node.y + 32);
+                    abText.setAttribute("class", "ab-text text-center");
+                    abText.setAttribute("text-anchor", "middle");
+                    const a = node.ab.alpha === -Infinity ? "-∞" : node.ab.alpha;
+                    const b = node.ab.beta === Infinity ? "∞" : node.ab.beta;
+                    abText.textContent = `[${a}, ${b}]`;
+                    g.appendChild(abText);
+                }
+
+                // 节点上方标注层级
+                if (node.index === 0) {
+                    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                    label.setAttribute("x", 10);
+                    label.setAttribute("y", node.y);
+                    label.setAttribute("style", "font-size: 10px; fill: #94a3b8; font-weight: bold;");
+                    label.textContent = node.player === 1 ? "MAX 层" : "MIN 层";
+                    svg.appendChild(label);
+                }
+
+                svg.appendChild(g);
+            });
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

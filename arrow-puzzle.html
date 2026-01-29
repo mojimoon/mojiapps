@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>箭头谜题 - Arrow Puzzle</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .cell {
+            transition: background-color 0.2s;
+        }
+        .cell.highlight {
+            background-color: rgba(59, 130, 246, 0.2);
+            border: 2px solid #3b82f6;
+        }
+        .cell-content {
+            font-size: 1.5rem;
+            font-weight: bold;
+            display: inline-block;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 font-sans">
+    <div id="app" class="max-w-4xl mx-auto p-4 md:p-8">
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-indigo-600 mb-2">箭头谜题</h1>
+            <p class="text-slate-500">点击方格旋转周围 3x3 区域，使所有箭头方向一致。</p>
+        </header>
+
+        <!-- Controls Area -->
+        <div class="bg-white rounded-2xl shadow-xl p-6 mb-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <!-- Size Control -->
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1">网格大小 (n):</label>
+                    <div class="flex gap-2">
+                        <input type="number" id="gridSizeInput" min="3" max="10" value="4" 
+                            class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                        <button onclick="resetGame()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition">应用</button>
+                    </div>
+                </div>
+
+                <!-- Display Mode -->
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1">显示模式:</label>
+                    <select id="displayMode" onchange="renderGrid()" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                        <option value="arrow">箭头 (↑, →, ↓, ←)</option>
+                        <option value="number">数字 (1, 2, 3, 4)</option>
+                    </select>
+                </div>
+
+                <!-- Status & Step -->
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1">步数:</label>
+                    <div id="stepCounter" class="text-2xl font-bold text-indigo-600">0</div>
+                </div>
+
+                <!-- Persistence -->
+                <div class="flex items-end gap-2">
+                    <button onclick="exportState()" class="flex-1 border border-slate-300 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm">导出</button>
+                    <button onclick="importState()" class="flex-1 border border-slate-300 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm">导入</button>
+                </div>
+            </div>
+
+            <!-- Main Game Area -->
+            <div class="flex flex-col items-center">
+                <div id="gridContainer" class="inline-grid gap-1 bg-slate-200 p-2 rounded-xl shadow-inner border border-slate-300 mb-6">
+                    <!-- Grid rendered here -->
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex flex-wrap justify-center gap-3">
+                    <button onclick="undo()" class="bg-white border border-slate-300 px-6 py-2 rounded-xl hover:bg-slate-50 shadow-sm transition">
+                        撤销 (Z)
+                    </button>
+                    <button onclick="resetGame()" class="bg-white border border-slate-300 px-6 py-2 rounded-xl hover:bg-slate-50 shadow-sm transition">
+                        重置 (R)
+                    </button>
+                    <button onclick="provideHint()" class="bg-amber-100 text-amber-700 border border-amber-200 px-6 py-2 rounded-xl hover:bg-amber-200 shadow-sm transition">
+                        提示 (H)
+                    </button>
+                    <button onclick="toggleSolver()" id="solverBtn" class="bg-emerald-100 text-emerald-700 border border-emerald-200 px-6 py-2 rounded-xl hover:bg-emerald-200 shadow-sm transition">
+                        自动求解
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer Info -->
+        <div class="text-center text-slate-400 text-sm">
+            <p>操作提示：点击一个方块，其自身及周围 8 个邻居将顺时针转动 90°。</p>
+        </div>
+
+        <!-- Solver Results Modal -->
+        <div id="solverModal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl w-full max-w-md p-6 max-h-[80vh] flex flex-col">
+                <h3 class="text-xl font-bold mb-4">求解方案</h3>
+                <div id="solverContent" class="overflow-y-auto flex-1 mb-4 text-slate-600">
+                    <!-- Steps logic -->
+                </div>
+                <button onclick="closeSolver()" class="bg-indigo-600 text-white w-full py-2 rounded-xl">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Game State ---
+        let currentGridSize = 4;
+        let grid = []; // 0: Up, 1: Right, 2: Down, 3: Left
+        let history = [];
+        let steps = 0;
+        const arrows = ['↑', '→', '↓', '←'];
+        const numbers = ['1', '2', '3', '4'];
+
+        // --- Initialization ---
+        function initGame() {
+            const sizeInput = document.getElementById('gridSizeInput');
+            currentGridSize = parseInt(sizeInput.value) || 4;
+            if (currentGridSize < 3) currentGridSize = 3;
+            if (currentGridSize > 10) currentGridSize = 10;
+            sizeInput.value = currentGridSize;
+            
+            grid = Array(currentGridSize * currentGridSize).fill(0).map(() => Math.floor(Math.random() * 4));
+            history = [];
+            steps = 0;
+            updateStepDisplay();
+            renderGrid();
+        }
+
+        function renderGrid() {
+            const container = document.getElementById('gridContainer');
+            const mode = document.getElementById('displayMode').value;
+            container.style.gridTemplateColumns = `repeat(${currentGridSize}, minmax(40px, 60px))`;
+            container.innerHTML = '';
+
+            grid.forEach((val, idx) => {
+                const cell = document.createElement('div');
+                cell.className = 'cell w-10 h-10 md:w-14 md:h-14 bg-white rounded-lg flex items-center justify-center cursor-pointer select-none shadow-sm hover:scale-105 active:bg-indigo-50 active:scale-95';
+                cell.dataset.index = idx;
+                
+                const span = document.createElement('span');
+                span.className = 'cell-content';
+                
+                if (mode === 'arrow') {
+                    // Arrow mode: Always use Up arrow and rotate it via CSS
+                    span.textContent = '↑';
+                    span.style.transform = `rotate(${val * 90}deg)`;
+                } else {
+                    // Number mode: Use the corresponding number and keep it upright (0deg)
+                    span.textContent = numbers[val];
+                    span.style.transform = `rotate(0deg)`;
+                }
+                
+                cell.appendChild(span);
+                cell.onclick = () => performMove(idx);
+                container.appendChild(cell);
+            });
+        }
+
+        // --- Gameplay Logic ---
+        function performMove(index, addToHistory = true) {
+            if (addToHistory) {
+                history.push([...grid]);
+                steps++;
+                updateStepDisplay();
+            }
+
+            const r = Math.floor(index / currentGridSize);
+            const c = index % currentGridSize;
+
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    const nr = r + dr;
+                    const nc = c + dc;
+                    if (nr >= 0 && nr < currentGridSize && nc >= 0 && nc < currentGridSize) {
+                        const targetIdx = nr * currentGridSize + nc;
+                        grid[targetIdx] = (grid[targetIdx] + 1) % 4;
+                    }
+                }
+            }
+            renderGrid();
+            checkWin();
+        }
+
+        function undo() {
+            if (history.length > 0) {
+                grid = history.pop();
+                steps--;
+                updateStepDisplay();
+                renderGrid();
+            }
+        }
+
+        function resetGame() {
+            initGame();
+        }
+
+        function updateStepDisplay() {
+            document.getElementById('stepCounter').textContent = steps;
+        }
+
+        function checkWin() {
+            if (grid.length === 0) return;
+            const first = grid[0];
+            const won = grid.every(v => v === first);
+            if (won) {
+                setTimeout(() => {
+                    alert(`恭喜！你用了 ${steps} 步完成了谜题！`);
+                }, 100);
+            }
+        }
+
+        // --- Import / Export ---
+        function exportState() {
+            const state = { n: currentGridSize, grid, steps };
+            const blob = new Blob([JSON.stringify(state)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `arrow_puzzle_${currentGridSize}x${currentGridSize}.json`;
+            a.click();
+        }
+
+        function importState() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const state = JSON.parse(event.target.result);
+                        currentGridSize = state.n;
+                        grid = state.grid;
+                        steps = state.steps || 0;
+                        document.getElementById('gridSizeInput').value = currentGridSize;
+                        history = [];
+                        updateStepDisplay();
+                        renderGrid();
+                    } catch (err) {
+                        alert('无效的文件格式');
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        }
+
+        // --- Solver Engine ---
+        async function solvePuzzle() {
+            if (currentGridSize > 4) {
+                alert("对于大于 4x4 的网格，暂不支持全自动暴力求解。");
+                return null;
+            }
+            
+            const queue = [{ state: [...grid], moves: [] }];
+            const visited = new Set();
+            visited.add(grid.join(','));
+
+            let head = 0;
+            const startTime = Date.now();
+            while (head < queue.length) {
+                if (Date.now() - startTime > 3000) break; 
+
+                const current = queue[head++];
+                const first = current.state[0];
+                if (current.state.every(v => v === first)) {
+                    return current.moves;
+                }
+
+                if (current.moves.length >= 10) continue; 
+
+                for (let i = 0; i < currentGridSize * currentGridSize; i++) {
+                    const nextState = applyRotation(current.state, i);
+                    const key = nextState.join(',');
+                    if (!visited.has(key)) {
+                        visited.add(key);
+                        queue.push({
+                            state: nextState,
+                            moves: [...current.moves, i]
+                        });
+                    }
+                }
+            }
+            return null;
+        }
+
+        function applyRotation(state, index) {
+            const newState = [...state];
+            const r = Math.floor(index / currentGridSize);
+            const c = index % currentGridSize;
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    const nr = r + dr;
+                    const nc = c + dc;
+                    if (nr >= 0 && nr < currentGridSize && nc >= 0 && nc < currentGridSize) {
+                        const targetIdx = nr * currentGridSize + nc;
+                        newState[targetIdx] = (newState[targetIdx] + 1) % 4;
+                    }
+                }
+            }
+            return newState;
+        }
+
+        async function provideHint() {
+            const btn = document.querySelector('button[onclick="provideHint()"]');
+            const originalText = btn.textContent;
+            btn.textContent = "计算中...";
+            const solution = await solvePuzzle();
+            btn.textContent = originalText;
+            
+            if (solution && solution.length > 0) {
+                const nextMoveIdx = solution[0];
+                const cells = document.querySelectorAll('.cell');
+                cells[nextMoveIdx].classList.add('highlight');
+                setTimeout(() => {
+                    cells[nextMoveIdx].classList.remove('highlight');
+                }, 1500);
+            } else {
+                alert("未能在步数限制内找到最优解，或已经是完成状态。");
+            }
+        }
+
+        async function toggleSolver() {
+            const content = document.getElementById('solverContent');
+            const modal = document.getElementById('solverModal');
+            content.innerHTML = "正在深度计算最优路径，请稍候...";
+            modal.classList.remove('hidden');
+
+            const solution = await solvePuzzle();
+            
+            if (solution && solution.length > 0) {
+                content.innerHTML = `<p class="mb-2 font-bold text-emerald-600">找到最优解：需要 ${solution.length} 步</p>`;
+                const list = document.createElement('ol');
+                list.className = "list-decimal pl-5 space-y-1";
+                solution.forEach(idx => {
+                    const r = Math.floor(idx / currentGridSize) + 1;
+                    const c = (idx % currentGridSize) + 1;
+                    const li = document.createElement('li');
+                    li.textContent = `点击第 ${r} 行, 第 ${c} 列`;
+                    list.appendChild(li);
+                });
+                content.appendChild(list);
+            } else if (solution && solution.length === 0 && grid.every(v => v === grid[0])) {
+                content.innerHTML = "当前已经是目标状态。";
+            } else {
+                content.innerHTML = "计算超时或在此深度无解。请尝试手动调整。";
+            }
+        }
+
+        function closeSolver() {
+            document.getElementById('solverModal').classList.add('hidden');
+        }
+
+        window.onkeydown = (e) => {
+            const tag = e.target.tagName.toLowerCase();
+            if (tag === 'input' || tag === 'textarea') return;
+
+            if (e.key.toLowerCase() === 'z') undo();
+            if (e.key.toLowerCase() === 'r') resetGame();
+            if (e.key.toLowerCase() === 'h') provideHint();
+        };
+
+        window.onload = initGame;
+    </script>
+</body>
+</html>
