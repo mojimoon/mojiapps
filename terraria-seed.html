@@ -415,7 +415,7 @@
         <textarea id="resultOutput" placeholder="点击生成按钮获取种子，或粘贴已有种子进行解析"></textarea>
         <div class="action-buttons" style="margin-top: 5px; padding-top: 5px; border-top: none;">
             <button id="copy-btn" class="btn btn-primary" onclick="copyResult()">复制种子</button>
-            <button id="parse-btn" class="btn btn-accent" onclick="parseSeedWrapper(resultOutput.value)">解析种子</button>
+            <button id="parse-btn" class="btn btn-accent" onclick="parseSeedHandler(resultOutput.value)">解析种子</button>
         </div>
 
         <div class="format-desc">
@@ -670,7 +670,7 @@
         return true;
     }
 
-    function parseSeedWrapper(seed) {
+    function parseSeedHandler(seed) {
         let success = parseSeed(seed);
         if (!success) {
             alert("无效的种子格式！请确保为正确的结构：大小.难度.邪恶.标志.彩蛋|彩蛋...|随机数");
