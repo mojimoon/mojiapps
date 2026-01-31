@@ -228,17 +228,17 @@
             resize: vertical;
             box-sizing: border-box;
         }
-        .copy-btn {
-            background-color: var(--accent-color);
-            color: white;
+        /* #copy-btn {
             border: none;
             padding: 10px;
             border-radius: 6px;
             cursor: pointer;
             font-weight: bold;
             width: 100%;
+        } */
+        #copy-btn:active, #parse-btn:active {
+            transform: translateY(2px); 
         }
-        .copy-btn:active { transform: translateY(1px); }
         .format-desc {
             font-size: 0.85em;
             color: #aaa;
@@ -411,9 +411,12 @@
 
     <!-- 右侧结果区 -->
     <div class="right-panel">
-        <h3>生成结果</h3>
-        <textarea id="resultOutput" readonly placeholder="点击生成按钮获取种子..."></textarea>
-        <button class="btn copy-btn" onclick="copyResult()">复制到剪贴板</button>
+        <h3>种子</h3>
+        <textarea id="resultOutput" placeholder="点击生成按钮获取种子，或粘贴已有种子进行解析"></textarea>
+        <div class="action-buttons" style="margin-top: 5px; padding-top: 5px; border-top: none;">
+            <button id="copy-btn" class="btn btn-primary" onclick="copyResult()">复制种子</button>
+            <button id="parse-btn" class="btn btn-accent" onclick="parseSeedWrapper(resultOutput.value)">解析种子</button>
+        </div>
 
         <div class="format-desc">
             <strong>如有帮助点个 Star ⭐️ 支持一下吧！</strong>
@@ -431,7 +434,7 @@
                 <li><strong>邪恶：</strong>1=腐化, 2=猩红</li>
                 <li><strong>标志：</strong>按位累加值。普通世界 (0) 与其他标志互斥；天顶世界 (255) 包含从 1 到 64 的所有选项；天空之岛 (256) 独立存在。</li>
                 <li><strong>彩蛋：</strong>多个彩蛋用竖线 <code>|</code> 分隔。</li>
-                <li><strong>随机数：</strong>0 到 2147483647 之间的整数，留空则自动生成。</li>
+                <li><strong>随机数：</strong>留空则自动生成一个 0 到 2147483647 之间的整数。</li>
             </ul>
         </div>
 
@@ -600,16 +603,84 @@
         // 15% 概率天空岛
         if (Math.random() < 0.15) document.getElementById('flag256').checked = true;
 
-        // 彩蛋：随机选 0-3 个
+        // 彩蛋：随机选 0-4 个
         const eggBoxes = document.querySelectorAll('.eggs-list input:not(:disabled)');
         eggBoxes.forEach(box => box.checked = false);
-        const count = Math.floor(Math.random() * 4); // 0 to 3
+        const count = Math.floor(Math.random() * 5); // 0 to 4
         for(let i=0; i<count; i++) {
             const randIdx = Math.floor(Math.random() * eggBoxes.length);
             eggBoxes[randIdx].checked = true;
         }
 
         generateSeed();
+    }
+
+    function parseSeed(seed) {
+        const parts = seed.split('.');
+        if (parts.length != 5) {
+            return false;
+        }
+        
+        let [size, diff, evil, flagValue, contentString] = parts;
+        size = parseInt(size);
+        document.getElementById(`size${size}`).checked = true;
+        diff = parseInt(diff);
+        document.getElementById(`diff${diff}`).checked = true;
+        evil = parseInt(evil);
+        document.getElementById(`evil${evil}`).checked = true;
+        flagValue = parseInt(flagValue);
+        if (flagValue == 0) {
+            document.getElementById('flag0').checked = true;
+        } else {
+            if (flagValue >= 256) {
+                document.getElementById('flag256').checked = true;
+                flagValue -= 256;
+            }
+            if (flagValue == 255) {
+                document.getElementById('flag255').checked = true;
+                handleZenith(document.getElementById('flag255'));
+            } else {
+                const flagChecks = [64, 32, 16, 8, 4, 2, 1];
+                flagChecks.forEach(val => {
+                    if (flagValue >= val) {
+                        document.getElementById(`flag${val}`).checked = true;
+                        flagValue -= val;
+                    }
+                });
+            }
+        }
+        const contentParts = contentString.split('|');
+        if (contentParts.length > 1) {
+            const randomNum = contentParts.pop();
+            document.getElementById('randomNumber').value = randomNum;
+            // 其余为彩蛋
+            const selectedEggs = contentParts;
+            document.querySelectorAll('.eggs-list input').forEach(el => {
+                if (selectedEggs.includes(el.value)) {
+                    el.checked = true;
+                } else {
+                    el.checked = false;
+                }
+            });
+        } else {
+            document.getElementById('randomNumber').value = contentParts[0];
+            document.querySelectorAll('.eggs-list input').forEach(el => el.checked = false);
+        }
+
+        return true;
+    }
+
+    function parseSeedWrapper(seed) {
+        let success = parseSeed(seed);
+        if (!success) {
+            alert("无效的种子格式！请确保为正确的结构：大小.难度.邪恶.标志.彩蛋|彩蛋...|随机数");
+        } else {
+            const originalText = document.querySelector('#parse-btn').innerText;
+            document.querySelector('#parse-btn').innerText = "解析成功！";
+            setTimeout(() => {
+                document.querySelector('#parse-btn').innerText = originalText;
+            }, 1500);
+        }
     }
 
     function resetFlagsUI() {
@@ -625,7 +696,7 @@
 
     function resetForm() {
         document.getElementById('size2').checked = true;
-        document.getElementById('diff2').checked = true;
+        document.getElementById('diff3').checked = true;
         // 邪恶随机
         document.getElementById(`evil${Math.floor(Math.random() * 2) + 1}`).checked = true;
         
@@ -699,15 +770,15 @@
 
     function copyResult() {
         const copyText = document.getElementById("resultOutput");
-        if (!copyText.value) return;
+        if (!copyText.value) generateSeed();
         
         copyText.select();
         copyText.setSelectionRange(0, 99999); 
         navigator.clipboard.writeText(copyText.value).then(() => {
-            const originalText = document.querySelector('.copy-btn').innerText;
-            document.querySelector('.copy-btn').innerText = "复制成功！";
+            const originalText = document.querySelector('#copy-btn').innerText;
+            document.querySelector('#copy-btn').innerText = "复制成功！";
             setTimeout(() => {
-                document.querySelector('.copy-btn').innerText = originalText;
+                document.querySelector('#copy-btn').innerText = originalText;
             }, 1500);
         });
     }
